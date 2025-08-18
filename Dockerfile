@@ -1,13 +1,13 @@
-FROM ubuntu:20.04
+FROM ubuntu:25.04
 
-LABEL maintainer="Fred Tingaud <ftingaud@hotmail.com>"
+LABEL maintainer="John Coffey"
 
 USER root
 
 ARG BACKEND_BRANCH=main
-
 ARG DEBIAN_FRONTEND=noninteractive
 
+# Install system dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     git \
@@ -16,41 +16,50 @@ RUN apt-get update && \
     gnupg2 \
     apt-transport-https \
     ca-certificates \
-    curl \
     gnupg-agent \
     software-properties-common \
-    npm \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
-RUN echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list
-RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+# Add Yarn repository and key
+RUN curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | gpg --dearmor | tee /usr/share/keyrings/yarnkey.gpg > /dev/null
+RUN echo "deb [signed-by=/usr/share/keyrings/yarnkey.gpg] https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list
 
-RUN npm cache clean -f && \
-    npm install -g n && \
-    n stable
+# Add Docker repository and key
+RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor | tee /usr/share/keyrings/docker-archive-keyring.gpg > /dev/null
 
-RUN add-apt-repository \
-    "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
-    $(lsb_release -cs) \
-    stable" && \
+# Install Node.js (includes npm) using NodeSource
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs
+
+# Add Docker repository and install Docker, Yarn
+RUN echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu jammy stable" > /etc/apt/sources.list.d/docker.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-    nodejs \
     yarn \
     docker-ce \
     docker-ce-cli \
     containerd.io \
     && rm -rf /var/lib/apt/lists/*
 
-ADD https://api.github.com/repos/fredtingaud/quick-bench-back-end/git/refs/heads/${BACKEND_BRANCH} /tmp/backend-version.json
+# Use your forked backend repo for version tracking and cloning
+ADD https://api.github.com/repos/johnco3/quick-bench-back-end/git/refs/heads/${BACKEND_BRANCH} /tmp/backend-version.json
 
-RUN git clone -b ${BACKEND_BRANCH} https://github.com/FredTingaud/quick-bench-back-end /quick-bench && \
+RUN git clone -b ${BACKEND_BRANCH} https://github.com/johnco3/quick-bench-back-end /quick-bench && \
     cd /quick-bench && \
     npm install && \
-    ./seccomp.js && \
-    sysctl -w kernel.perf_event_paranoid=1
+    echo '{ \
+      "defaultAction": "SCMP_ACT_ALLOW", \
+      "archMap": [ \
+        { "architecture": "SCMP_ARCH_X86_64", "subArchitectures": [ "SCMP_ARCH_X86", "SCMP_ARCH_X32" ] }, \
+        { "architecture": "SCMP_ARCH_AARCH64", "subArchitectures": [ "SCMP_ARCH_ARM" ] } \
+      ], \
+      "syscalls": [ \
+        { "names": ["perf_event_open"], "action": "SCMP_ACT_ALLOW" } \
+      ] \
+    }' > seccomp.json && \
+    (sysctl -w kernel.perf_event_paranoid=1 || echo "Cannot set perf_event_paranoid in container")
 
+# Frontend version tracking and cloning
 ADD https://api.github.com/repos/fredtingaud/quick-bench-front-end/git/refs/heads/main /tmp/frontend-version.json
 
 RUN git clone -b main https://github.com/FredTingaud/quick-bench-front-end /quick-bench/quick-bench-front-end && \
@@ -61,7 +70,8 @@ RUN git clone -b main https://github.com/FredTingaud/quick-bench-front-end /quic
     yarn && \
     yarn build
 
+# Copy startup scripts
 COPY ./build-scripts/start-* /quick-bench/
 
+# Set working directory
 WORKDIR /quick-bench
-
