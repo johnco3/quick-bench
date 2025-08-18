@@ -1,13 +1,13 @@
-FROM ubuntu:25.04
+
+# --- Build Stage ---
+FROM ubuntu:25.04 AS build
 
 LABEL maintainer="John Coffey"
-
 USER root
-
 ARG BACKEND_BRANCH=main
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies
+# Install build dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     git \
@@ -24,22 +24,9 @@ RUN apt-get update && \
 RUN curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | gpg --dearmor | tee /usr/share/keyrings/yarnkey.gpg > /dev/null
 RUN echo "deb [signed-by=/usr/share/keyrings/yarnkey.gpg] https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list
 
-# Add Docker repository and key
-RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor | tee /usr/share/keyrings/docker-archive-keyring.gpg > /dev/null
-
 # Install Node.js (includes npm) using NodeSource
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y --no-install-recommends nodejs
-
-# Add Docker repository and install Docker, Yarn
-RUN echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu jammy stable" > /etc/apt/sources.list.d/docker.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-    yarn \
-    docker-ce \
-    docker-ce-cli \
-    containerd.io \
-    && rm -rf /var/lib/apt/lists/*
 
 # Use your forked backend repo for version tracking and cloning
 ADD https://api.github.com/repos/johnco3/quick-bench-back-end/git/refs/heads/${BACKEND_BRANCH} /tmp/backend-version.json
@@ -62,7 +49,8 @@ RUN git clone -b ${BACKEND_BRANCH} https://github.com/johnco3/quick-bench-back-e
 # Frontend version tracking and cloning
 ADD https://api.github.com/repos/fredtingaud/quick-bench-front-end/git/refs/heads/main /tmp/frontend-version.json
 
-RUN git clone -b main https://github.com/FredTingaud/quick-bench-front-end /quick-bench/quick-bench-front-end && \
+RUN apt-get update && apt-get install -y --no-install-recommends yarn && \
+    git clone -b main https://github.com/FredTingaud/quick-bench-front-end /quick-bench/quick-bench-front-end && \
     cd /quick-bench/quick-bench-front-end/build-bench && \
     yarn && \
     yarn build && \
@@ -72,6 +60,17 @@ RUN git clone -b main https://github.com/FredTingaud/quick-bench-front-end /quic
 
 # Copy startup scripts
 COPY ./build-scripts/start-* /quick-bench/
+
+# --- Production Stage ---
+FROM ubuntu:25.04 AS final
+
+# Install only runtime dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nodejs ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy built backend and frontend from build stage
+COPY --from=build /quick-bench /quick-bench
 
 # Set working directory
 WORKDIR /quick-bench
