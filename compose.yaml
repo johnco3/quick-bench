@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  bench-runner:
+    image: johnco3/bench-runner
+    command: ./start-build-bench
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - local.env
+    environment:
+      - BENCH_ROOT=${PWD}
+    tty: true

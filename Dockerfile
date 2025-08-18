@@ -1,9 +1,7 @@
-
 # --- Build Stage ---
 FROM ubuntu:25.04 AS build
 
 LABEL maintainer="John Coffey"
-USER root
 ARG BACKEND_BRANCH=main
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -24,9 +22,13 @@ RUN apt-get update && \
 RUN curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | gpg --dearmor | tee /usr/share/keyrings/yarnkey.gpg > /dev/null
 RUN echo "deb [signed-by=/usr/share/keyrings/yarnkey.gpg] https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list
 
-# Install Node.js (includes npm) using NodeSource
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs
+# Add NodeSource repository and key for Node.js (prebuilt binaries)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+
+# Install Node.js (includes npm) and Yarn
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nodejs yarn && \
+    rm -rf /var/lib/apt/lists/*
 
 # Use your forked backend repo for version tracking and cloning
 ADD https://api.github.com/repos/johnco3/quick-bench-back-end/git/refs/heads/${BACKEND_BRANCH} /tmp/backend-version.json
@@ -49,8 +51,7 @@ RUN git clone -b ${BACKEND_BRANCH} https://github.com/johnco3/quick-bench-back-e
 # Frontend version tracking and cloning
 ADD https://api.github.com/repos/fredtingaud/quick-bench-front-end/git/refs/heads/main /tmp/frontend-version.json
 
-RUN apt-get update && apt-get install -y --no-install-recommends yarn && \
-    git clone -b main https://github.com/FredTingaud/quick-bench-front-end /quick-bench/quick-bench-front-end && \
+RUN git clone -b main https://github.com/FredTingaud/quick-bench-front-end /quick-bench/quick-bench-front-end && \
     cd /quick-bench/quick-bench-front-end/build-bench && \
     yarn && \
     yarn build && \
@@ -64,13 +65,28 @@ COPY ./build-scripts/start-* /quick-bench/
 # --- Production Stage ---
 FROM ubuntu:25.04 AS final
 
-# Install only runtime dependencies
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Add NodeSource repository and key for Node.js (prebuilt binaries)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+
+# Install only runtime dependencies (prebuilt Node.js and certs)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends nodejs ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
+# Create a non-root user and group
+RUN groupadd --system quickbench && \
+    useradd --system --create-home --home-dir /quick-bench --gid quickbench quickbench
+
 # Copy built backend and frontend from build stage
 COPY --from=build /quick-bench /quick-bench
+
+# Set permissions for the non-root user
+RUN chown -R quickbench:quickbench /quick-bench
+
+# Switch to non-root user
+USER quickbench
 
 # Set working directory
 WORKDIR /quick-bench
