@@ -30,11 +30,22 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends nodejs yarn && \
     rm -rf /var/lib/apt/lists/*
 
-# Use your forked backend repo for version tracking and cloning
+# Frontend version tracking and cloning
+ADD https://api.github.com/repos/fredtingaud/quick-bench-front-end/git/refs/heads/main /tmp/frontend-version.json
+
+RUN git clone -b main https://github.com/FredTingaud/quick-bench-front-end /quick-bench/quick-bench-front-end && \
+    cd /quick-bench/quick-bench-front-end/build-bench && \
+    yarn && \
+    yarn build && \
+    cd ../quick-bench && \
+    yarn && \
+    yarn build
+
+# Use your forked backend repo for version tracking and cloning (separate directory)
 ADD https://api.github.com/repos/johnco3/quick-bench-back-end/git/refs/heads/${BACKEND_BRANCH} /tmp/backend-version.json
 
-RUN git clone -b ${BACKEND_BRANCH} https://github.com/johnco3/quick-bench-back-end /quick-bench && \
-    cd /quick-bench && \
+RUN git clone -b ${BACKEND_BRANCH} https://github.com/johnco3/quick-bench-back-end /quick-bench-back-end && \
+    cd /quick-bench-back-end && \
     npm install && \
     echo '{ \
       "defaultAction": "SCMP_ACT_ALLOW", \
@@ -48,16 +59,8 @@ RUN git clone -b ${BACKEND_BRANCH} https://github.com/johnco3/quick-bench-back-e
     }' > seccomp.json && \
     (sysctl -w kernel.perf_event_paranoid=1 || echo "Cannot set perf_event_paranoid in container")
 
-# Frontend version tracking and cloning
-ADD https://api.github.com/repos/fredtingaud/quick-bench-front-end/git/refs/heads/main /tmp/frontend-version.json
-
-RUN git clone -b main https://github.com/FredTingaud/quick-bench-front-end /quick-bench/quick-bench-front-end && \
-    cd /quick-bench/quick-bench-front-end/build-bench && \
-    yarn && \
-    yarn build && \
-    cd ../quick-bench && \
-    yarn && \
-    yarn build
+# Copy backend files to /quick-bench (overwriting if necessary)
+RUN cp -r /quick-bench-back-end/* /quick-bench/
 
 # Copy startup scripts
 COPY ./build-scripts/start-* /quick-bench/
@@ -72,8 +75,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 
 # Install only runtime dependencies (prebuilt Node.js and certs)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends nodejs ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+   apt-get install -y --no-install-recommends nodejs ca-certificates docker-ce-cli && \
+   rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user and group
 RUN groupadd --system quickbench && \
