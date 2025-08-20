@@ -69,27 +69,25 @@ COPY ./build-scripts/start-* /quick-bench/
 FROM ubuntu:25.04 AS final
 
 ARG DEBIAN_FRONTEND=noninteractive
+ARG DOCKER_VERSION=25.0.3
+
+# Install only runtime dependencies (prebuilt Node.js, certs & curl)
+RUN apt-get update && \
+   apt-get install -y --no-install-recommends nodejs ca-certificates curl && \
+   rm -rf /var/lib/apt/lists/*
 
 # Add NodeSource repository and key for Node.js (prebuilt binaries)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 
-# Install only runtime dependencies (prebuilt Node.js and certs)
-RUN apt-get update && \
-   apt-get install -y --no-install-recommends nodejs ca-certificates docker-ce-cli && \
-   rm -rf /var/lib/apt/lists/*
-
-# Create a non-root user and group
-RUN groupadd --system quickbench && \
-    useradd --system --create-home --home-dir /quick-bench --gid quickbench quickbench
+# Install Docker CLI manually (multi-arch)
+RUN ARCH=$(dpkg --print-architecture); \
+    [ "$ARCH" = "amd64" ] && ARCH="x86_64"; \
+    [ "$ARCH" = "arm64" ] && ARCH="aarch64"; \
+    curl -L https://download.docker.com/linux/static/stable/$ARCH/docker-$DOCKER_VERSION.tgz | tar -xz -C /usr/local/bin --strip-components=1 docker/docker && \
+    chmod +x /usr/local/bin/docker
 
 # Copy built backend and frontend from build stage
 COPY --from=build /quick-bench /quick-bench
-
-# Set permissions for the non-root user
-RUN chown -R quickbench:quickbench /quick-bench
-
-# Switch to non-root user
-USER quickbench
 
 # Set working directory
 WORKDIR /quick-bench
